@@ -2,6 +2,13 @@ import cv2
 import numpy as np
 import os
 import urllib.request
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Use the script's directory as the base for model files
+MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FILES = {
     "prototxt": ("colorization_deploy_v2.prototxt",
@@ -12,16 +19,35 @@ FILES = {
             "https://raw.githubusercontent.com/richzhang/colorization/caffe/colorization/resources/pts_in_hull.npy"),
 }
 
-def ensure_file(local_name, url):
-    if not os.path.exists(local_name):
-        urllib.request.urlretrieve(url, local_name)
+def ensure_file(local_path, url):
+    """Download a file if it doesn't already exist, with error handling."""
+    if not os.path.exists(local_path):
+        logger.info(f"Downloading {os.path.basename(local_path)} from {url}...")
+        try:
+            urllib.request.urlretrieve(url, local_path)
+            logger.info(f"Downloaded {os.path.basename(local_path)} ({os.path.getsize(local_path)} bytes)")
+        except Exception as e:
+            # Clean up partial downloads
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            logger.error(f"Failed to download {os.path.basename(local_path)}: {e}")
+            raise RuntimeError(f"Failed to download model file: {os.path.basename(local_path)}") from e
+    else:
+        logger.info(f"Found existing {os.path.basename(local_path)}")
 
 def load_model():
+    """Load the colorization model, downloading files if needed."""
     for _, (fname, url) in FILES.items():
-        ensure_file(fname, url)
+        local_path = os.path.join(MODEL_DIR, fname)
+        ensure_file(local_path, url)
 
-    net = cv2.dnn.readNetFromCaffe(FILES["prototxt"][0], FILES["caffemodel"][0])
-    pts = np.load(FILES["pts"][0])
+    prototxt_path = os.path.join(MODEL_DIR, FILES["prototxt"][0])
+    caffemodel_path = os.path.join(MODEL_DIR, FILES["caffemodel"][0])
+    pts_path = os.path.join(MODEL_DIR, FILES["pts"][0])
+
+    logger.info("Loading Caffe model...")
+    net = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
+    pts = np.load(pts_path)
 
     class8 = net.getLayerId("class8_ab")
     conv8 = net.getLayerId("conv8_313_rh")
@@ -30,11 +56,21 @@ def load_model():
     net.getLayer(class8).blobs = [pts.astype("float32")]
     net.getLayer(conv8).blobs = [np.full([1, 313], 2.606, dtype="float32")]
 
+    logger.info("Model loaded successfully!")
     return net
 
-net = load_model()
+# Lazy loading: only load when first needed, not at import time
+_net = None
+
+def get_model():
+    """Get the model, loading it lazily on first call."""
+    global _net
+    if _net is None:
+        _net = load_model()
+    return _net
 
 def colorize_image(img):
+    net = get_model()
     h, w = img.shape[:2]
     img_float = img.astype("float32") / 255.0
     lab = cv2.cvtColor(img_float, cv2.COLOR_BGR2LAB)
