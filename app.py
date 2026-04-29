@@ -76,7 +76,14 @@ def home():
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         img = cv2.resize(img, (128, 128))
 
-        output = colorize_image(img)
+        import cv2
+        # Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Apply fake colorization (heatmap style)
+        output = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
+
+        
 
         _, buffer = cv2.imencode('.jpg', output)
         img_base64 = base64.b64encode(buffer).decode('utf-8')
