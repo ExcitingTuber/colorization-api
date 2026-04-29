@@ -36,10 +36,10 @@ net = load_model()
 
 def colorize_image(img):
     h, w = img.shape[:2]
-    img_float = img.astype("uint8") / 255.0
+    img_float = img.astype("float32") / 255.0
     lab = cv2.cvtColor(img_float, cv2.COLOR_BGR2LAB)
 
-    resized = cv2.resize(lab, (96, 96))
+    resized = cv2.resize(lab, (224, 224))
     L = resized[:, :, 0]
     L -= 50
 
@@ -53,6 +53,3 @@ def colorize_image(img):
     color_bgr = np.clip(color_bgr, 0, 1)
 
     return (color_bgr * 255).astype("uint8")
-    del lab
-    del resized
-    del ab
