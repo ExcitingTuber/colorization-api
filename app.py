@@ -72,11 +72,9 @@ def home():
     if request.method == "POST":
         file = request.files['image']
         file_bytes = np.frombuffer(file.read(), np.uint8)
+
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
-        h, w = img.shape[:2]
-        scale = 224 / max(h, w)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)))
+        img = cv2.resize(img, (128, 128))
 
         output = colorize_image(img)
 
