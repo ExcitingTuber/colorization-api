@@ -2,5 +2,7 @@
 *.npy
 *.prototxt
 *.pb
+*.pth
+weights/
 __pycache__/
 *.pyc
