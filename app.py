@@ -29,7 +29,7 @@ def process_colorize(input_image):
 
 
 def process_upscale(input_image, scale, enhance_faces):
-    """Upscale an image using Real-ESRGAN."""
+    """Upscale an image using Real-ESRGAN with before/after comparison."""
     if input_image is None:
         raise gr.Error("Please upload an image first.")
 
@@ -40,11 +40,20 @@ def process_upscale(input_image, scale, enhance_faces):
 
     h_in, w_in = input_image.shape[:2]
     h_out, w_out = output_rgb.shape[:2]
-    info = f"{w_in}×{h_in} → {w_out}×{h_out} (Real-ESRGAN {scale})"
-    if enhance_faces:
-        info += " + GFPGAN face restore"
-    download_path = save_image_for_download(output_bgr, "hd_upscale")
-    return output_rgb, info, download_path
+
+    # Create a naive bicubic upscale for comparison
+    bicubic_bgr = cv2.resize(img_bgr, (w_out, h_out), interpolation=cv2.INTER_CUBIC)
+    bicubic_rgb = cv2.cvtColor(bicubic_bgr, cv2.COLOR_BGR2RGB)
+
+    info = (
+        f"Original: {w_in}×{h_in} → Enhanced: {w_out}×{h_out}\n"
+        f"Model: Real-ESRGAN x4plus{' + GFPGAN' if enhance_faces else ''}\n"
+        f"Tip: Download the image and zoom in to see the detail difference!"
+    )
+    download_path = save_image_for_download(output_bgr, "hd_restored")
+
+    # Return: bicubic (naive), real-esrgan (enhanced), slider comparison, info, download
+    return (bicubic_rgb, output_rgb), info, download_path
 
 
 def process_colorize_and_upscale(input_image, scale, enhance_faces):
@@ -60,14 +69,22 @@ def process_colorize_and_upscale(input_image, scale, enhance_faces):
 
     h_in, w_in = input_image.shape[:2]
     h_out, w_out = output_rgb.shape[:2]
-    info = f"Colorized + Enhanced: {w_in}×{h_in} → {w_out}×{h_out}"
+
+    # Bicubic comparison of the colorized image
+    bicubic_bgr = cv2.resize(colorized_bgr, (w_out, h_out), interpolation=cv2.INTER_CUBIC)
+    bicubic_rgb = cv2.cvtColor(bicubic_bgr, cv2.COLOR_BGR2RGB)
+
+    info = (
+        f"Original: {w_in}×{h_in} → Enhanced: {w_out}×{h_out}\n"
+        f"Pipeline: Colorize → Real-ESRGAN{' + GFPGAN' if enhance_faces else ''}"
+    )
     download_path = save_image_for_download(output_bgr, "colorized_hd")
-    return output_rgb, info, download_path
+    return (bicubic_rgb, output_rgb), info, download_path
 
 
 # Build the Gradio interface
 with gr.Blocks(
-    title="Image Colorization & HD Upscale",
+    title="Image Colorization & HD Restore",
     theme=gr.themes.Soft(primary_hue="violet"),
     css="""
         .gradio-container { max-width: 960px !important; margin: auto; }
@@ -88,51 +105,53 @@ with gr.Blocks(
             with gr.Row():
                 c_input = gr.Image(label="Upload B&W Image", type="numpy")
                 c_output = gr.Image(label="Colorized Result", type="numpy")
-            c_info = gr.Textbox(label="Resolution", interactive=False, elem_classes="res-info")
+            c_info = gr.Textbox(label="Info", interactive=False, elem_classes="res-info")
             c_btn = gr.Button("✨ Colorize", variant="primary", size="lg")
             c_download = gr.File(label="📥 Download Colorized Image")
             c_btn.click(fn=process_colorize, inputs=c_input, outputs=[c_output, c_info, c_download])
 
         # --- Tab 2: HD Restore ---
         with gr.TabItem("🔍 HD Restore"):
-            with gr.Row():
-                u_input = gr.Image(label="Upload Image", type="numpy")
-                u_output = gr.Image(label="Restored HD Result", type="numpy")
+            u_input = gr.Image(label="Upload Image", type="numpy")
             with gr.Row():
                 u_scale = gr.Radio(["2x", "4x"], value="4x", label="Upscale Factor")
                 u_faces = gr.Checkbox(label="🧑 Enhance Faces (GFPGAN)", value=False)
-            u_info = gr.Textbox(label="Resolution", interactive=False, elem_classes="res-info")
             u_btn = gr.Button("🔍 Restore & Upscale", variant="primary", size="lg")
+            gr.Markdown("### Result — drag the slider to compare Bicubic (left) vs Real-ESRGAN (right)")
+            u_slider = gr.ImageSlider(label="Bicubic ← → Real-ESRGAN", type="numpy")
+            u_info = gr.Textbox(label="Info", interactive=False, elem_classes="res-info", lines=3)
             u_download = gr.File(label="📥 Download HD Image")
             u_btn.click(
                 fn=process_upscale,
                 inputs=[u_input, u_scale, u_faces],
-                outputs=[u_output, u_info, u_download],
+                outputs=[u_slider, u_info, u_download],
             )
 
         # --- Tab 3: Colorize + HD ---
         with gr.TabItem("🚀 Colorize + HD"):
             gr.Markdown("*Upload a B&W image to colorize **and** restore in one step.*")
-            with gr.Row():
-                cu_input = gr.Image(label="Upload B&W Image", type="numpy")
-                cu_output = gr.Image(label="Colorized HD Result", type="numpy")
+            cu_input = gr.Image(label="Upload B&W Image", type="numpy")
             with gr.Row():
                 cu_scale = gr.Radio(["2x", "4x"], value="4x", label="Upscale Factor")
                 cu_faces = gr.Checkbox(label="🧑 Enhance Faces (GFPGAN)", value=False)
-            cu_info = gr.Textbox(label="Resolution", interactive=False, elem_classes="res-info")
             cu_btn = gr.Button("🚀 Colorize + Restore", variant="primary", size="lg")
+            gr.Markdown("### Result — drag the slider to compare Bicubic (left) vs Real-ESRGAN (right)")
+            cu_slider = gr.ImageSlider(label="Bicubic ← → Real-ESRGAN", type="numpy")
+            cu_info = gr.Textbox(label="Info", interactive=False, elem_classes="res-info", lines=3)
             cu_download = gr.File(label="📥 Download Colorized HD Image")
             cu_btn.click(
                 fn=process_colorize_and_upscale,
                 inputs=[cu_input, cu_scale, cu_faces],
-                outputs=[cu_output, cu_info, cu_download],
+                outputs=[cu_slider, cu_info, cu_download],
             )
 
     gr.Markdown(
         "---\n"
         "**Models:** Colorization — Zhang et al. (2016) · "
         "Super-Resolution — [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (x4plus) · "
-        "Face Restore — [GFPGAN](https://github.com/TencentARC/GFPGAN) v1.4"
+        "Face Restore — [GFPGAN](https://github.com/TencentARC/GFPGAN) v1.4\n\n"
+        "**💡 Tip:** The quality difference is best seen by downloading the image and zooming in, "
+        "or by using the comparison slider."
     )
 
 if __name__ == "__main__":
