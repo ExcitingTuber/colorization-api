@@ -59,18 +59,52 @@ def get_sr_model(scale):
     return _sr_models[scale]
 
 
+def enhance_image(img):
+    """
+    Post-processing pipeline to sharpen and enhance the upscaled image.
+    Applies edge-preserving denoising, unsharp masking, and adaptive contrast.
+    """
+    # Step 1: Bilateral filter — removes noise while keeping edges crisp
+    denoised = cv2.bilateralFilter(img, 5, 50, 50)
+
+    # Step 2: Unsharp masking — sharpens edges and details
+    gaussian = cv2.GaussianBlur(denoised, (0, 0), 2.0)
+    sharpened = cv2.addWeighted(denoised, 1.8, gaussian, -0.8, 0)
+
+    # Step 3: CLAHE on L channel — adaptive contrast enhancement
+    lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    enhanced = cv2.merge([l, a, b])
+    result = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    return np.clip(result, 0, 255).astype("uint8")
+
+
+def _upscale_single_pass(img, scale):
+    """Run a single EDSR upscale pass."""
+    sr = get_sr_model(scale)
+    return sr.upsample(img)
+
+
 def upscale_image(img, scale=4):
     """
-    Upscale an image using EDSR super-resolution.
+    Upscale an image using EDSR super-resolution with enhancement.
+
+    For 4x: runs two passes of x2 (produces significantly sharper results
+    than a single x4 pass because the model refines details incrementally).
+
+    Finishes with a post-processing enhancement pipeline (denoise + sharpen + contrast).
 
     Args:
         img: BGR image (numpy array, uint8)
         scale: 2 or 4
 
     Returns:
-        Upscaled BGR image (numpy array, uint8)
+        Upscaled and enhanced BGR image (numpy array, uint8)
     """
-    if scale not in UPSCALE_MODELS:
+    if scale not in (2, 4):
         raise ValueError(f"Unsupported scale: {scale}. Use 2 or 4.")
 
     h, w = img.shape[:2]
@@ -86,9 +120,22 @@ def upscale_image(img, scale=4):
         logger.info(f"Resized input from {w}x{h} to {new_w}x{new_h} before {scale}x upscale")
         h, w = new_h, new_w
 
-    sr = get_sr_model(scale)
-    result = sr.upsample(img)
+    if scale == 4:
+        # Two-pass x2 produces much sharper results than single x4
+        logger.info(f"Upscaling {w}x{h} with two-pass x2 (effective x4)...")
+        img = _upscale_single_pass(img, 2)
+        mid_h, mid_w = img.shape[:2]
+        logger.info(f"  Pass 1: {w}x{h} -> {mid_w}x{mid_h}")
+        img = _upscale_single_pass(img, 2)
+        out_h, out_w = img.shape[:2]
+        logger.info(f"  Pass 2: {mid_w}x{mid_h} -> {out_w}x{out_h}")
+    else:
+        img = _upscale_single_pass(img, 2)
+        out_h, out_w = img.shape[:2]
+        logger.info(f"Upscaled: {w}x{h} -> {out_w}x{out_h}")
 
-    out_h, out_w = result.shape[:2]
-    logger.info(f"Upscaled: {w}x{h} -> {out_w}x{out_h}")
+    # Post-processing enhancement
+    logger.info("Applying enhancement pipeline (denoise + sharpen + contrast)...")
+    result = enhance_image(img)
+
     return result
