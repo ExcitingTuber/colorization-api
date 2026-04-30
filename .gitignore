@@ -1,5 +1,6 @@
 *.caffemodel
 *.npy
 *.prototxt
+*.pb
 __pycache__/
 *.pyc
